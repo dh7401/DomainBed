@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models
 
-from domainbed.lib import misc
 from domainbed.lib import wide_resnet
+import copy
 
 
 def remove_batch_norm_from_resnet(model):
@@ -41,14 +41,6 @@ class Identity(nn.Module):
     def forward(self, x):
         return x
 
-class SqueezeLastTwo(nn.Module):
-    """A module which squeezes the last two dimensions, ordinary squeeze can be a problem for batch size 1"""
-    def __init__(self):
-        super(SqueezeLastTwo, self).__init__()
-
-    def forward(self, x):
-        return x.view(x.shape[0], x.shape[1])
-
 
 class MLP(nn.Module):
     """Just  an MLP"""
@@ -57,7 +49,7 @@ class MLP(nn.Module):
         self.input = nn.Linear(n_inputs, hparams['mlp_width'])
         self.dropout = nn.Dropout(hparams['mlp_dropout'])
         self.hiddens = nn.ModuleList([
-            nn.Linear(hparams['mlp_width'],hparams['mlp_width'])
+            nn.Linear(hparams['mlp_width'], hparams['mlp_width'])
             for _ in range(hparams['mlp_depth']-2)])
         self.output = nn.Linear(hparams['mlp_width'], n_outputs)
         self.n_outputs = n_outputs
@@ -73,6 +65,7 @@ class MLP(nn.Module):
         x = self.output(x)
         return x
 
+
 class ResNet(torch.nn.Module):
     """ResNet with the softmax chopped off and the batchnorm frozen"""
     def __init__(self, input_shape, hparams):
@@ -84,7 +77,7 @@ class ResNet(torch.nn.Module):
             self.network = torchvision.models.resnet50(pretrained=True)
             self.n_outputs = 2048
 
-        self.network = remove_batch_norm_from_resnet(self.network)
+        # self.network = remove_batch_norm_from_resnet(self.network)
 
         # adapt number of channels
         nc = input_shape[0]
@@ -122,6 +115,7 @@ class ResNet(torch.nn.Module):
             if isinstance(m, nn.BatchNorm2d):
                 m.eval()
 
+
 class MNIST_CNN(nn.Module):
     """
     Hand-tuned architecture for MNIST.
@@ -143,8 +137,7 @@ class MNIST_CNN(nn.Module):
         self.bn2 = nn.GroupNorm(8, 128)
         self.bn3 = nn.GroupNorm(8, 128)
 
-        self.avgpool = nn.AdaptiveAvgPool2d((1,1))
-        self.squeezeLastTwo = SqueezeLastTwo()
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
     def forward(self, x):
         x = self.conv1(x)
@@ -164,8 +157,9 @@ class MNIST_CNN(nn.Module):
         x = self.bn3(x)
 
         x = self.avgpool(x)
-        x = self.squeezeLastTwo(x)
+        x = x.view(len(x), -1)
         return x
+
 
 class ContextNet(nn.Module):
     def __init__(self, input_shape):
@@ -190,7 +184,7 @@ class ContextNet(nn.Module):
 def Featurizer(input_shape, hparams):
     """Auto-select an appropriate featurizer for the given input shape."""
     if len(input_shape) == 1:
-        return MLP(input_shape[0], 128, hparams)
+        return MLP(input_shape[0], hparams["mlp_width"], hparams)
     elif input_shape[1:3] == (28, 28):
         return MNIST_CNN(input_shape)
     elif input_shape[1:3] == (32, 32):
@@ -211,3 +205,24 @@ def Classifier(in_features, out_features, is_nonlinear=False):
             torch.nn.Linear(in_features // 4, out_features))
     else:
         return torch.nn.Linear(in_features, out_features)
+
+
+class WholeFish(nn.Module):
+    def __init__(self, input_shape, num_classes, hparams, weights=None):
+        super(WholeFish, self).__init__()
+        featurizer = Featurizer(input_shape, hparams)
+        classifier = Classifier(
+            featurizer.n_outputs,
+            num_classes,
+            hparams['nonlinear_classifier'])
+        self.net = nn.Sequential(
+            featurizer, classifier
+        )
+        if weights is not None:
+            self.load_state_dict(copy.deepcopy(weights))
+
+    def reset_weights(self, weights):
+        self.load_state_dict(copy.deepcopy(weights))
+
+    def forward(self, x):
+        return self.net(x)

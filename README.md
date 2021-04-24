@@ -27,6 +27,9 @@ The [currently available algorithms](domainbed/algorithms.py) are:
 * Variance Risk Extrapolation (VREx, [Krueger et al., 2020](https://arxiv.org/abs/2003.00688)), contributed by [@zdhNarsil](https://github.com/zdhNarsil)
 * Representation Self-Challenging (RSC, [Huang et al., 2020](https://arxiv.org/abs/2007.02454)), contributed by [@SirRob1997](https://github.com/SirRob1997)
 * Spectral Decoupling (SD, [Pezeshki et al., 2020](https://arxiv.org/abs/2011.09468))
+* Learning Explanations that are Hard to Vary (AND-Mask, [Parascandolo et al., 2020](https://arxiv.org/abs/2009.00329))
+* Out-of-Distribution Generalization with Maximal Invariant Predictor (IGA, [Koyama et al., 2020](https://arxiv.org/abs/2008.01883))
+* Gradient Matching for Domain Generalization (Fish, [Shi et al., 2021](https://arxiv.org/pdf/2104.09937.pdf))
 
 Send us a PR to add your algorithm! Our implementations use ResNet50 / ResNet18 networks ([He et al., 2015](https://arxiv.org/abs/1512.03385)) and the hyper-parameter grids [described here](domainbed/hparams_registry.py).
 
@@ -60,17 +63,18 @@ Send us a PR to add your dataset! Any custom image dataset with folder structure
 Download the datasets:
 
 ```sh
-python -m domainbed.scripts.download \
-       --data_dir=/my/datasets/path
+python3 -m domainbed.scripts.download \
+       --data_dir=./domainbed/data
 ```
 
 Train a model:
 
 ```sh
-python -m domainbed.scripts.train\
-       --data_dir=/my/datasets/path\
-       --algorithm ERM\
-       --dataset RotatedMNIST
+python3 -m domainbed.scripts.train\
+       --data_dir=./domainbed/data/MNIST/\
+       --algorithm IGA\
+       --dataset ColoredMNIST\
+       --test_env 2
 ```
 
 Launch a sweep:
