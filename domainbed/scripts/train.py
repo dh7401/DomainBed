@@ -229,6 +229,10 @@ if __name__ == "__main__":
             for name, loader, weights in evals:
                 acc = misc.accuracy(algorithm, loader, weights, device)
                 results[name+'_acc'] = acc
+                
+                if isinstance(algorithm, algorithms.IRM) or isinstance(algorithm, algorithms.IRMv2):
+                    penalty = misc.penalty(algorithm, loader, weights, device)
+                    results[name+'_pen'] = penalty
 
             results_keys = sorted(results.keys())
             if results_keys != last_results_keys:

@@ -139,3 +139,45 @@ class LeaveOneOutSelectionMethod(SelectionMethod):
             return step_accs.argmax('val_acc')
         else:
             return None
+
+class PenaltyBasedSelectionMethod(SelectionMethod):
+    """Picks argmin(normalized_penalty)"""
+    name = "IRM penalty-based"
+
+    @classmethod
+    def sweep_acc(self, records):
+        if 'env0_out_pen' not in records[0].keys():
+            return None
+        
+        return super().sweep_acc(records)
+            
+    @classmethod
+    def _step_acc(self, record):
+        """Given a single record, return a {normalized_penalty, val_acc, test_acc} dict."""
+        
+        test_env = record['args']['test_envs'][0]
+        test_in_acc_key = 'env{}_in_acc'.format(test_env)
+
+        val_acc_keys = []
+        val_pen_keys = []
+        for i in itertools.count():
+            if f'env{i}_out_acc' not in record:
+                break
+            if i != test_env:
+                val_acc_keys.append(f'env{i}_out_acc')
+                val_pen_keys.append(f'env{i}_out_pen')
+        
+        return {
+            'normalized_penalty': np.mean([record[key] for key in val_pen_keys]),
+            'val_acc': np.mean([record[key] for key in val_acc_keys]),
+            'test_acc': record[test_in_acc_key],
+        }
+
+    @classmethod
+    def run_acc(self, run_records):
+        test_records = get_test_records(run_records)
+        if not len(test_records):
+            return None
+        return test_records.map(self._step_acc).argmin('normalized_penalty')
+        
+        

@@ -14,6 +14,7 @@ from domainbed.lib.misc import random_pairs_of_minibatches
 ALGORITHMS = [
     'ERM',
     'IRM',
+    'IRMv2',
     'GroupDRO',
     'Mixup',
     'MLDG',
@@ -232,6 +233,7 @@ class IRM(ERM):
         super(IRM, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
         self.register_buffer('update_count', torch.tensor([0]))
+        self.num_classes = num_classes
 
     @staticmethod
     def _irm_penalty(logits, y):
@@ -251,7 +253,7 @@ class IRM(ERM):
                           1.0)
         nll = 0.
         penalty = 0.
-
+  
         all_x = torch.cat([x for x,y in minibatches])
         all_logits = self.network(all_x)
         all_logits_idx = 0
@@ -277,6 +279,55 @@ class IRM(ERM):
         self.optimizer.step()
 
         self.update_count += 1
+        return {'loss': loss.item(), 'nll': nll.item(),
+            'penalty': penalty.item()}
+
+
+class IRMv2(ERM):
+    """Invariant Risk Minimization Version 2"""
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(IRMv2, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        self.register_buffer('lagrangian_coefficients', torch.zeros((num_domains, num_classes)))
+        self.env_penalties = [None] * num_domains
+        self.num_classes = num_classes
+
+    def _irm_penalty(self, logits, y):
+        device = "cuda" if logits[0][0].is_cuda else "cpu"
+        scale = torch.tensor([1.] * self.num_classes).to(device).requires_grad_()
+        loss = F.cross_entropy(logits * scale, y)
+        grad = autograd.grad(loss, [scale], create_graph=True)[0]
+        return grad
+
+    def update(self, minibatches, unlabeled=None):
+        device = "cuda" if minibatches[0][0].is_cuda else "cpu"
+        nll = 0.
+        penalty = 0.
+
+        all_x = torch.cat([x for x,y in minibatches])
+        all_logits = self.network(all_x)
+        all_logits_idx = 0
+
+        for i, (x, y) in enumerate(minibatches):
+            logits = all_logits[all_logits_idx:all_logits_idx + x.shape[0]]
+            all_logits_idx += x.shape[0]
+            nll += F.cross_entropy(logits, y)
+            self.env_penalties[i] = self._irm_penalty(logits, y)
+            nll += (self.lagrangian_coefficients[i] * self.env_penalties[i]).sum()
+            penalty += (self.env_penalties[i]**2).sum()
+            
+        nll /= len(minibatches)
+        penalty /= len(minibatches)
+        loss = nll + 5. * penalty
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        
+        for i in range(len(self.env_penalties)):
+            self.lagrangian_coefficients[i] += self.env_penalties[i].detach()
+    
         return {'loss': loss.item(), 'nll': nll.item(),
             'penalty': penalty.item()}
 

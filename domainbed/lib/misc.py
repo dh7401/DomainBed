@@ -12,6 +12,8 @@ from shutil import copyfile
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+import torch.autograd as autograd
 import tqdm
 from collections import Counter
 
@@ -130,6 +132,31 @@ def accuracy(network, loader, weights, device):
     network.train()
 
     return correct / total
+
+def penalty(network, loader, weights, device):
+    network.eval()
+    penalty = torch.zeros(network.num_classes).to(device)
+    normalizer = torch.zeros(network.num_classes).to(device)
+    num_data = 0
+    
+    for x, y in loader:
+        num_data += y.shape[0]
+        x = x.to(device)
+        y = y.to(device)
+        logits = network.predict(x)
+        scale = torch.tensor([1.] * network.num_classes).to(device).requires_grad_()
+        loss = F.cross_entropy(logits * scale, y, reduction='sum')
+        penalty += autograd.grad(loss, [scale])[0].detach()
+        normalizer += (logits**2).sum(axis=0).detach()
+    
+    penalty /= num_data
+    normalizer /= num_data
+    penalty /= torch.sqrt(normalizer) 
+    
+    network.zero_grad()
+    network.train()
+    
+    return (penalty**2).sum().item()
 
 class Tee:
     def __init__(self, fname, mode="a"):
